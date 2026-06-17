@@ -151,7 +151,7 @@ class Robot:
 
     def _build_motor_id_list(self):
         self._motor_id_list = [
-                self._joint_name_to_id[motor_names]
+                self._joint_name_to_id[motor_name]
                 for motor_name in self._get_motor_names()
             ]
 
@@ -233,7 +233,7 @@ class Robot:
         Returns:
             Velocities of all motors.
         """
-        motor_velocities = [satte[1] for state in self._joint_states]
+        motor_velocities = [state[1] for state in self._joint_states]
         motor_velocities = np.multiply(motor_velocities, self._motor_direction)
 
         return motor_velocities
@@ -259,7 +259,7 @@ class Robot:
         q, qdot = self.get_pdo_observation()
         qdot_true = self.get_motor_velocities()
 
-        actual_torque, observed_torques = self._motor_model.convert_to_torque(
+        actual_torque, observed_torque = self._motor_model.convert_to_torque(
                 motor_commands, q, qdot, qdot_true, motor_control_mode)
 
         # The torque is already in the observation space the use of 
@@ -282,7 +282,7 @@ class Robot:
                 motor_ids.append(motor_id)
                 motor_torques.append(0)
 
-        self._set_motor_torques_by_id(motor_ids, torques)
+        self._set_motor_torques_by_id(motor_ids, motor_torque)
 
     def _set_motor_torques_by_ids(self, motor_ids, torques):
         self._pybullet_client.setJoinMotorControlArray(
