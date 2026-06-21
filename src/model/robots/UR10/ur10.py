@@ -1,4 +1,4 @@
-from src.model.robots.UR10 import constants, marks, motor_constants
+from src.model.robots.UR10 import constants, marks, motor_constants, ctrl_constants
 from src.model.robots.robot import Robot
 
 
@@ -13,6 +13,11 @@ class UR10(Robot):
     def get_motor_constants(cls):
         del cls
         return motor_constants
+    
+    @classmethod
+    def get_ctrl_constants(cls):
+        del cls
+        return ctrl_constants
 
     @classmethod
     def get_constants(cls):

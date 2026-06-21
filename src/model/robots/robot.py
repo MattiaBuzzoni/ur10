@@ -25,7 +25,7 @@ class Robot:
         self._constants = self.get_constants()
         self._num_motors = self._marks.MARK_PARAMS[self._mark]['num_motors']
         self._motor_names = self._marks.MARK_PARAMS[self._mark]['motor_names']
-        self._motor_enabled_list = self.get_motor_constants().MOTOR.ENABLES
+        self._motor_enabled_list = self.get_motor_constants().MOTOR_ENABLED
         self._motor_offset = self.get_motor_constants().MOTOR_OFFSET
         self._motor_direction = self.get_motor_constants().MOTOR_DIRECTION
         # ...
@@ -34,8 +34,10 @@ class Robot:
         self._robotic_arm = self._load_urdf()
         # Build joints dicts
         self._build_urdf_ids()
-        self._dh_params = self._get_dh_params()
         self._build_joint_name_to_dict()
+        self._build_motor_id_list()
+        self._build_joint_limits()
+        self._build_dh_table()
         # ...
 
         self.reset_pose()
@@ -49,10 +51,11 @@ class Robot:
         # self.get_motor_class() return a Python class. 
         # The second set of parentheses would be the class init.
         self._motor_model = self.get_motor_class()(
+                num_motors=self._num_motors,
                 kp=self.get_motor_constants().MOTOR_POSITION_GAINS,
                 kd=self.get_motor_constants().MOTOR_VELOCITY_GAINS,
+                torque_limits= np.array([330,  330, 150, 56, 56, 56]),
                 motor_control_mode=motor_control_mode,
-                num_motors=self._num_motors
                 )
 
 
@@ -66,7 +69,7 @@ class Robot:
     
     @property
     def dh_params(self):
-        return self._dh_params
+        return self._table
 
     @property
     def num_motors(self):
@@ -75,6 +78,10 @@ class Robot:
     @property
     def get_joint_states(self):
         return self._joint_states
+    
+    @property
+    def get_joint_limits(self):
+        return self._joint_limits
 
     @property
     def get_motor_model(self):
@@ -121,7 +128,7 @@ class Robot:
     def get_motor_velocity_gains(self):
         return self.get_motor_constants().MOTOR_VELOCITY_GAINS
 
-    def receive_observations(self):
+    def receive_observation(self):
         self._joint_states = self._pybullet_client.getJointStates(self._robotic_arm, self._motor_id_list)
     
     
@@ -156,32 +163,38 @@ class Robot:
             ]
 
 
-    def _get_dh_params(self):
+    def _build_dh_table(self):
 
         from prettytable import PrettyTable
         
-        table = PrettyTable()
-        table.title = "Denavit–Hartenberg parameters"
-        table.field_names = ["Kinematics", "a[m]", "d[m]", "alpha[rad]", "Dynamics"]
+        self._table = PrettyTable()
+        self._table.title = "Denavit–Hartenberg parameters"
+        self._table.field_names = ["Kinematics", "a[m]", "d[m]", "alpha[rad]", "Dynamics"]
         for i in range(1, 7):
-            table.add_row(["Joint " + str(i), 
+            self._table.add_row(["Joint " + str(i), 
                            self._constants.a[i-1], 
                            self._constants.d[i-1], 
                            self._constants.alpha[i-1],
                            "Link " + str(i-1)])
 
-        return table
+        return self._table
     
-    def get_joint_info(self):
+    def _build_joint_limits(self):
         lower_limits, upper_limits, joint_ranges = [], [], []
         for j in range(self._pybullet_client.getNumJoints(self._robotic_arm)):
             info = self._pybullet_client.getJointInfo(self._robotic_arm, j)
-            if info[2] != self._pybullet_client.JOINT_FIXED:
+            if info[2] == self._pybullet_client.JOINT_FIXED:
+                # joint fisso: range zero
+                lower_limits.append(0.0)
+                upper_limits.append(0.0)
+                joint_ranges.append(0.0)
+            else:
                 lower_limits.append(info[8])
                 upper_limits.append(info[9])
                 joint_ranges.append(info[9] - info[8])
 
-        return lower_limits, upper_limits, joint_ranges
+        self._joint_limits = [lower_limits, upper_limits, joint_ranges]
+        return self._joint_limits
 
     def get_flange_state(self):
         return self._pybullet_client.getLinkState(self._robotic_arm, 6)
@@ -255,6 +268,7 @@ class Robot:
             motor_commands: np.array. Can be motor angles, torques, hybrid command.
             motor_control_mode: A MotorControlMode enum.
         """
+
         motor_commands = np.asarray(motor_commands)
         q, qdot = self.get_pdo_observation()
         qdot_true = self.get_motor_velocities()
@@ -282,17 +296,41 @@ class Robot:
                 motor_ids.append(motor_id)
                 motor_torques.append(0)
 
-        self._set_motor_torques_by_id(motor_ids, motor_torque)
+        self._set_motor_torques_by_id(motor_ids, motor_torques)
 
-    def _set_motor_torques_by_ids(self, motor_ids, torques):
-        self._pybullet_client.setJoinMotorControlArray(
+    def _set_motor_torques_by_id(self, motor_ids, torques):
+        self._pybullet_client.setJointMotorControlArray(
                 bodyIndex=self._robotic_arm,
                 jointIndices=motor_ids,
-                controlMode=self._pybulle_client.TORQUE_CONTROL,
+                controlMode=self._pybullet_client.TORQUE_CONTROL,
                 forces=torques)
 
     def _build_urdf_ids(self):
         pass
+
+    def ee_effector_position(self, link_id):
+        """Computes the link's local position in the world frame.
+        Args:
+          link_id: The link to calculate its position.
+        Returns:
+          The position of the link.
+        """
+        link_state = self._pybullet_client.getLinkState(self._robotic_arm, link_id)
+        link_position = link_state[4]
+
+        return np.array(link_position)
+    
+    def ee_effector_orientation(self, link_id):
+        """Computes the link's local orientation in the world frame.
+        Args:
+          link_id: The link to calculate its orientation.
+        Returns:
+          The orientation of the link.
+        """
+        link_state = self._pybullet_client.getLinkState(self._robotic_arm, link_id)
+        #link_orientation = self._pybullet_client.getMatrixFromQuaternion(link_state[5])
+        link_orientation = link_state[5]
+        return np.array(link_orientation)
 
 
     def terminate(self):

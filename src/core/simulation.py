@@ -1,6 +1,7 @@
 import pybullet
 import pybullet_data as pd
 import numpy as np
+import time
 from src.utils import bullet_client
 
 from src.core import sim_constants
@@ -13,6 +14,7 @@ class Simulation:
         self,
         robot_model,
         mark,
+        controller_class,
         terrain_id=None,
         terrain_type='plane',
         record_video=False,
@@ -24,7 +26,7 @@ class Simulation:
         
         self._sim_mode = sim_mode
         if self._sim_mode == 'classic':
-            self._init_classic_mode(robot_model, mark, terrain_id, terrain_type,
+            self._init_classic_mode(robot_model, mark, controller_class, terrain_id, terrain_type,
                                     record_video, render, debug, pybullet_client)
             
     # @property turns a method into a read-only attribute (no parentheses needed).
@@ -37,6 +39,10 @@ class Simulation:
     @property
     def robot(self):
         return self._robot
+    
+    @property
+    def controller(self):
+        return self._controller_obj
     
     @property
     def terrain(self):
@@ -58,6 +64,7 @@ class Simulation:
         self,
         robot_model,
         mark,
+        controller_class,
         terrain_id=None,
         terrain_type='blank',
         record_video=False,
@@ -71,7 +78,7 @@ class Simulation:
         self._robot_model = robot_model
         self._mark = mark
         self._env_time_step = sim_constants.ACTION_REPEAT * sim_constants.SIMULATION_TIME_STEP
-
+        
         # Create PyBullet Client
         self._pybullet_client = self._start_simulation(
             record_video, 
@@ -79,8 +86,9 @@ class Simulation:
             sim_constants.SIMULATION_TIME_STEP, 
             pybullet_client
         )
+        self._pybullet_client.setTimeStep(1.0 / 240.0)
 
-        self.build_world(terrain_id, terrain_type)
+        self.build_world(controller_class, terrain_id, terrain_type)
 
         self._pybullet_client.configureDebugVisualizer(self._pybullet_client.COV_ENABLE_RENDERING, debug)
         self._pybullet_client.configureDebugVisualizer(self._pybullet_client.COV_ENABLE_GUI, debug)
@@ -102,14 +110,18 @@ class Simulation:
 
         return pybullet_client
     
-    def build_world(self, terrain_id, terrain_type):
+    def build_world(self, controller_class, terrain_id, terrain_type):
         # Generate terrain
         self._generate_terrain(terrain_id, terrain_type, self._pybullet_client)
         # Create robot
         self._robot = self._robot_model(pybullet_client=self._pybullet_client,
                                         mark=self._mark,
                                         simulation=self,
+                                        motor_control_mode=controller_class.MOTOR_CONTROL_MODE,
                                         )
+        
+        # Setup locomotion controller
+        self._controller_obj = controller_class(self._robot, self._get_time_since_reset)
 
         self.reset()
 
@@ -142,6 +154,8 @@ class Simulation:
     def reset(self):
         self._step_counter = 0
         self._state_action_counter = 0
+        # Setup robot controller
+        #self.controller.reset()
 
     def set_camera(self, roll, pitch, yaw):
         self.pybullet_client.resetDebugVisualizerCamera(
@@ -158,15 +172,15 @@ class Simulation:
     def _get_time_since_reset(self):
         return self._step_counter * sim_constants.SIMULATION_TIME_STEP
     
-    def _step_internal(self, action):
-        self._robot.apply_action(action)
+    def _step_internal(self, action, motor_control_mode):
+        self._robot.apply_action(action, motor_control_mode)
         self._pybullet_client.stepSimulation()
         self._state_action_counter += 1
 
     def apply_step_action(self, action):
         """Steps emulation."""
         for i in range(sim_constants.ACTION_REPEAT):
-            self._step_internal(action)
+            self._step_internal(action, self.controller.MOTOR_CONTROL_MODE)
             self._step_counter += 1
 
     def setup_ui_parameters(self):

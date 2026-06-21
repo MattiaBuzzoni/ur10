@@ -154,3 +154,20 @@ class Kinematics:
     theta = theta.real
 
     return theta
+  
+  def solve_IK(self, link_position, link_orientation, link_id):
+      lower_limits, upper_limits, joint_ranges = self._robot.get_joint_limits
+      joint_angles = self._pybullet_client.calculateInverseKinematics(
+          self._robot.get_robot_id,
+          link_id,
+          link_position,
+          link_orientation,
+          lowerLimits=lower_limits,
+          upperLimits=upper_limits,
+          jointRanges=joint_ranges,
+          maxNumIterations=100,
+          residualThreshold=1e-5
+      )
+      return list(joint_angles[:6]) 
+
+
